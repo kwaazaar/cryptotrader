@@ -260,4 +260,5 @@ paket-files/
 __pycache__/
 *.pyc
 /Poloniex.APIClient/appsettings.json
-/Poloniex.APIClient/appsettings.json
+**/appsettings.json
+appsettings.json
