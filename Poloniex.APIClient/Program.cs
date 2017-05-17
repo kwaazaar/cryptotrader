@@ -32,7 +32,7 @@ namespace Poloniex.APIClient
 
                     // Na 1200 terugschroeven naar 1000
                     if (tickerData.Count > 1200)
-                        tickerData = tickerData..OrderByDescending(td => td.Timestamp).Take(1000).OrderBy(td => td.Timestamp).ToList();
+                        tickerData = tickerData.OrderByDescending(td => td.Timestamp).Take(1000).OrderBy(td => td.Timestamp).ToList();
 
                     var analyzer = new DataAnalyzer(tickerData);
                     var dropRes = analyzer.CheckCurve(t.Timestamp, CurveConfig.Drop(minCurvePct: 0.08m));
