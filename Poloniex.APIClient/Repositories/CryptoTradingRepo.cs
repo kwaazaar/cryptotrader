@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Data.SqlClient;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -65,6 +66,40 @@ namespace Poloniex.APIClient.Repositories
                 { "@periodStartUtc", periodStartUtc },
                 { "@periodEndUtc", periodEndUtc },
             }).ConfigureAwait(false);
+        }
+
+        public async Task<IEnumerable<Order>> GetOrders(string currency, DateTime periodStartUtc, DateTime periodEndUtc)
+        {
+            var query = "SELECT * FROM Order " +
+                "WHERE Currency = @currency AND timestamp BETWEEN @periodStartUtc AND @periodEndUtc";
+
+            return await TranQueryAsync<Order>(query, new Dictionary<string, object>
+            {
+                { "@currency", currency },
+                { "@periodStartUtc", periodStartUtc },
+                { "@periodEndUtc", periodEndUtc },
+            }).ConfigureAwait(false);
+        }
+
+        public async Task<Order> GetLastOrder(string currency)
+        {
+            var query = "SELECT TOP 1 * FROM Order " +
+                "WHERE Currency = @currency ORDER BY timestamp DESC";
+
+            var orders = await TranQueryAsync<Order>(query, new Dictionary<string, object>
+            {
+                { "@currency", currency },
+            }).ConfigureAwait(false);
+
+            return orders.FirstOrDefault();
+        }
+
+        public async Task<int> AddOrder(Order o)
+        {
+            var query = "INSERT INTO Order (Currency, BaseCurrency, Amount, Price, Fee, TotalPrice, Timestamp) " +
+                "VALUES (@currency, @baseCurrency, @amount, @price, @fee, @totalprice, @timestamp)";
+
+            return await TranExecuteAsync(query, o).ConfigureAwait(false);
         }
     }
 }

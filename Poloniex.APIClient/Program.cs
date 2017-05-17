@@ -1,4 +1,5 @@
-﻿using Poloniex.APIClient.Models;
+﻿using Microsoft.Extensions.Configuration;
+using Poloniex.APIClient.Models;
 using Poloniex.APIClient.Repositories;
 using System;
 using System.Collections.Concurrent;
@@ -16,10 +17,18 @@ namespace Poloniex.APIClient
     {
         static void Main(string[] args)
         {
+            var builder = new ConfigurationBuilder()
+                .SetBasePath(AppContext.BaseDirectory)
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                .AddEnvironmentVariables();
+            var config = builder.Build();
+
+            var connectionString = config["connectionString"];
+            var maxBuyPrice = decimal.Parse(config["maxBuyPrice"]);
+            if (maxBuyPrice > 0.5m) throw new InvalidOperationException("maxBuyPrice too high");
+
             var client = new PoloniexAPIClient();
             client.Connect().GetAwaiter().GetResult();
-
-            var connectionString = "Server=cryptotrading.database.windows.net;Database=CryptoTradingDB;User ID=cryptotrading;password=2jhNmj43;MultipleActiveResultSets=true;";
 
             var cancellationTokenSource = new CancellationTokenSource();
 
