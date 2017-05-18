@@ -1,4 +1,0 @@
-{
-  "connectionString": "Server=cryptotrading.database.windows.net;Database=CryptoTradingDB;User ID=cryptotrading;password=PapaOeteh15;MultipleActiveResultSets=true;",
-  "maxBuyPrice": 0.1
-}
