@@ -17,6 +17,8 @@ namespace Poloniex.APIClient
     {
         static string connectionString = null;
         static decimal maxBuyPrice = 0m;
+        static string poloKey = null;
+        static string poloSecret = null;
 
         static void Main(string[] args)
         {
@@ -28,10 +30,15 @@ namespace Poloniex.APIClient
 
             connectionString = config["connectionString"];
             maxBuyPrice = decimal.Parse(config["maxBuyPrice"]);
+            poloKey = config["polo:key"];
+            poloSecret = config["polo:secret"];
+            
             if (maxBuyPrice > 0.5m) throw new InvalidOperationException("maxBuyPrice too high");
 
-            var client = new PoloniexAPIClient();
+            var client = new PoloniexAPIClient(poloKey, poloSecret);
             client.Connect().GetAwaiter().GetResult();
+            var btcBalance = client.GetBalance("ETH");
+            var openOrders = client.GetOpenOrders("BTC_STR");
 
             // Check a specific period
             /*
@@ -48,10 +55,10 @@ namespace Poloniex.APIClient
                 Console.WriteLine($"Is Drop-{m}: {isDrop.Result}, drop-pct: {isDrop.Value}");
             }
             */
-            
+
             var cancellationTokenSource = new CancellationTokenSource();
             List<Ticker> tickerData = new List<Ticker>();
-            client.Ticker("BTC_STR", onTicker: (t) => ProcessTickerData(tickerData, t), onException: (ex) =>
+            client.Ticker("BTC_ETH", onTicker: (t) => ProcessTickerData(tickerData, t), onException: (ex) =>
                 {
                     Console.WriteLine("API-call error: " + ex.ToString());
                 },

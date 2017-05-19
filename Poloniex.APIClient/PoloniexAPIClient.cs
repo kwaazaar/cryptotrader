@@ -1,7 +1,12 @@
-﻿using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Poloniex.APIClient.Models;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,15 +18,23 @@ namespace Poloniex.APIClient
     public class PoloniexAPIClient : IDisposable
     {
         private readonly string _pushApiAddress;
+        private readonly string _orderApiAddress;
+        private readonly string _poloKey;
+        private readonly byte[] _poloSecret;
+        private static int nonce = 0;
+        private static object nonceLock = new object();
 
-        public PoloniexAPIClient()
-            : this("wss://api.poloniex.com")
+        public PoloniexAPIClient(string poloKey, string poloSecret)
+            : this("wss://api.poloniex.com", "https://poloniex.com/tradingApi", poloKey, poloSecret)
         {
         }
 
-        public PoloniexAPIClient(string pushApiAddress)
+        public PoloniexAPIClient(string pushApiAddress, string orderApiAddress, string poloKey, string poloSecret)
         {
             _pushApiAddress = pushApiAddress;
+            _orderApiAddress = orderApiAddress;
+            _poloKey = poloKey;
+            _poloSecret = Encoding.UTF8.GetBytes(poloSecret);
         }
 
         public async Task Connect()
@@ -102,6 +115,39 @@ namespace Poloniex.APIClient
             } while (lastEx != null); // Keep restarting while errors occur
         }
 
+        public Dictionary<string,BalanceDetails> GetBalance(string currency = null)
+        {
+            var balances = ExecuteRequest<Dictionary<string, BalanceDetails>>("returnCompleteBalances");
+            if (currency != null)
+                balances = new Dictionary<string, BalanceDetails> { { currency, balances[currency] } };
+            return balances;
+        }
+
+        public Dictionary<string,OpenOrder> GetOpenOrders(string currencyPair = null)
+        {
+            var openOrders = ExecuteRequest<Dictionary<string, OpenOrder>>("returnOpenOrders", new Dictionary<string, string> { {"currencyPair", currencyPair ?? "all" } });
+            return openOrders;
+        }
+
+        public OrderAndTrades PlaceOrder(string currencyPair, decimal rate, decimal amount, bool isBuy)
+        {
+            var order = ExecuteRequest<OrderAndTrades>(isBuy ? "buy" : "sell", new Dictionary<string, string>
+            {
+                { "currencyPair", currencyPair },
+                { "rate", rate.ToString(CultureInfo.InvariantCulture) },
+                { "amount", amount.ToString(CultureInfo.InvariantCulture) },
+                { "immediateOrCancel", "1" }, // Force
+            });
+            return order;
+        }
+        public void CancelOrder(string orderNumber)
+        {
+            var order = ExecuteRequest<string>("cancelOrder", new Dictionary<string, string>
+            {
+                { "orderNumber", orderNumber },
+            });
+        }
+
         public void Disconnect()
         {
             //_channel = null;
@@ -111,6 +157,31 @@ namespace Poloniex.APIClient
         {
             //if (_channel != null)
             //    Disconnect();
+        }
+
+        private T ExecuteRequest<T>(string command, Dictionary<string, string> arguments = null)
+        {
+            using (var client = new HttpClient { BaseAddress = new Uri(_orderApiAddress) })
+            {
+                var formParams = new Dictionary<string, string>
+                {
+                    { "command", "returnCompleteBalances" },
+                    { "nonce", $"{DateTime.UtcNow.Ticks}" }
+                };
+                if (arguments != null)
+                    arguments.ToList().ForEach(kvp => formParams.Add(kvp.Key, kvp.Value));
+
+                var content = new FormUrlEncodedContent(formParams);
+                var hash = new HMACSHA512(_poloSecret).ComputeHash(content.ReadAsByteArrayAsync().GetAwaiter().GetResult());
+
+                var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_orderApiAddress, UriKind.Absolute));
+                request.Headers.Add("Key", _poloKey);
+                request.Headers.Add("Sign", String.Join(string.Empty, hash.Select(b => b.ToString("X2"))));
+                request.Content = content;
+                var response = client.SendAsync(request).GetAwaiter().GetResult();
+                var contentAsString = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                return JsonConvert.DeserializeObject<T>(contentAsString);
+            }
         }
     }
 }
