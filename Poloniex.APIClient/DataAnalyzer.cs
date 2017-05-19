@@ -78,22 +78,23 @@ namespace Poloniex.APIClient
             return groups;
         }
 
-        public AnalysisResult CheckCurve(DateTime time, CurveConfig curveConfig, int groupsizeSeconds = 30)
+        public AnalysisResult CheckCurve(DateTime time, CurveConfig curveConfig, int groupsizeSeconds = 10)
         {
             var messages = new List<string>();
 
             try
             {
                 var groups = Aggregate(RawData, TimeSpan.FromSeconds(groupsizeSeconds));
+                groups.ToList().ForEach(g => System.Console.WriteLine($"AVG: {g.Average}, LAST: {g.Last}"));
 
                 if (groups.Count() > 2)
                 {
 
-                    var hasDiff = (groups.Last().Last != groups.First().Last);
+                    var hasDiff = (groups.Last().Average != groups.First().Average);
 
                     // Drop: 1 - (60/80) = 1 - .75 = .25
                     // Raise: 1 - (80/60) = 1 - 1.33 = -.33
-                    var curvePct = 1m - (groups.Last().Last / groups.First().Last);
+                    var curvePct = 1m - (groups.Last().Average / groups.First().Average);
                     var isOkCurve = false;
 
                     if (hasDiff)
@@ -104,8 +105,10 @@ namespace Poloniex.APIClient
                         if (curveSteepEnough)
                         {
                             messages.Add($"Curve found of {curvePct * 100:N2} %");
-                            var grpMostRecentStart = groups.Where(g => g.Timestamp < groups.Last().Timestamp.AddTicks(-1 * curveConfig.MostRecentPeriodLength.Ticks)).Last(); // Kan null zijn?
-                            var curvePctMostRecent = 1m - (groups.Last().Last / grpMostRecentStart.Last);
+                            var grpMostRecentStart = groups
+                                .Where(g => g.Timestamp >= groups.Last().Timestamp.Subtract(curveConfig.MostRecentPeriodLength))
+                                .OrderBy(g => g.Timestamp).First(); // Kan null zijn?
+                            var curvePctMostRecent = 1m - (groups.Last().Average / grpMostRecentStart.Average);
                             var minCurveMostRecent = curvePct * 0.1m;
 
                             var finalCurveSteepEnough = ((curveConfig.MinCurvePct > 0 && curvePctMostRecent >= minCurveMostRecent)
@@ -123,7 +126,7 @@ namespace Poloniex.APIClient
                             messages.Add($"CurvePct {curvePct * 100:N2} % does not meet minimum {curveConfig.MinCurvePct * 100:N2} %.");
                     }
                     else
-                        messages.Add($"No diff (first: {groups.First().Last}, last: {groups.Last().Last})");
+                        messages.Add($"No diff (first: {groups.First().Average}, last: {groups.Last().Average})");
 
                     return AnalysisResult.Create(isOkCurve, curvePct, messages);
                 }

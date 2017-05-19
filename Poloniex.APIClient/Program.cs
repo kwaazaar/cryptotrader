@@ -15,6 +15,9 @@ namespace Poloniex.APIClient
 {
     class Program
     {
+        static string connectionString = null;
+        static decimal maxBuyPrice = 0m;
+
         static void Main(string[] args)
         {
             var builder = new ConfigurationBuilder()
@@ -23,74 +26,84 @@ namespace Poloniex.APIClient
                 .AddEnvironmentVariables();
             var config = builder.Build();
 
-            var connectionString = config["connectionString"];
-            var maxBuyPrice = decimal.Parse(config["maxBuyPrice"]);
+            connectionString = config["connectionString"];
+            maxBuyPrice = decimal.Parse(config["maxBuyPrice"]);
             if (maxBuyPrice > 0.5m) throw new InvalidOperationException("maxBuyPrice too high");
 
             var client = new PoloniexAPIClient();
             client.Connect().GetAwaiter().GetResult();
 
+            // Check a specific period
+            /*
+            for (int m = 29; m < 30; m++)
+            {
+                var periodEndUtc = new DateTime(2017, 5, 18, 14, m, 0, DateTimeKind.Utc);
+                var periodStartUtc = periodEndUtc.Subtract(CurveConfig.Drop().PeriodLength);
+                List<Ticker> testTickerData = null;
+                using (var repo = new CryptoTradingRepo(new SqlConnection(connectionString), TimeSpan.FromSeconds(5)))
+                    testTickerData = repo.GetTicker("STR", "BTC", periodStartUtc, periodEndUtc).GetAwaiter().GetResult().ToList();
+                var analyzer = new DataAnalyzer(testTickerData);
+                var isDrop = analyzer.CheckCurve(periodEndUtc, CurveConfig.Drop());
+                isDrop.Messages.ForEach(msg => Console.WriteLine(msg));
+                Console.WriteLine($"Is Drop-{m}: {isDrop.Result}, drop-pct: {isDrop.Value}");
+            }
+            */
+            
             var cancellationTokenSource = new CancellationTokenSource();
-
             List<Ticker> tickerData = new List<Ticker>();
-
-            client.Ticker("BTC_STR",
-                onTicker: (t) =>
-                {
-                    tickerData.Add(t);
-
-                    // Na 1200 terugschroeven naar 1000
-                    if (tickerData.Count > 1200)
-                        tickerData = tickerData.OrderByDescending(td => td.Timestamp).Take(1000).OrderBy(td => td.Timestamp).ToList();
-
-                    var analyzer = new DataAnalyzer(tickerData);
-                    var dropRes = analyzer.CheckCurve(t.Timestamp, CurveConfig.Drop(minCurvePct: 0.08m));
-                    if (dropRes.Result)
-                        t.CurvePct = dropRes.Value;
-                    else
-                    {
-                        var raiseRes = analyzer.CheckCurve(t.Timestamp, CurveConfig.Raise(minCurvePct: -0.08m));
-                        if (raiseRes.Result)
-                            t.CurvePct = raiseRes.Value;
-                    }
-
-                    Console.Write(t.ToString() + "...");
-                    if (t.CurvePct.HasValue)
-                        Console.Write($"({t.CurvePct.Value * 100:N2} % curve!)...");
-
-                    try
-                    {
-                        using (var repo = new CryptoTradingRepo(new SqlConnection(connectionString), TimeSpan.FromSeconds(5)))
-                        {
-                            repo.StoreTicker(t).GetAwaiter().GetResult();
-                        }
-                        Console.WriteLine("OK");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine("Repo-error: " + ex.ToString());
-                    }
-
-                },
-                onException: (ex) =>
+            client.Ticker("BTC_STR", onTicker: (t) => ProcessTickerData(tickerData, t), onException: (ex) =>
                 {
                     Console.WriteLine("API-call error: " + ex.ToString());
                 },
                 cancellationToken: cancellationTokenSource.Token);
-
-            /*
-            var analyzer = new DataAnalyzer(tickerData);
-            var isDrop = analyzer.CheckCurve(utcNow, CurveConfig.Drop());
-
-            isDrop.Messages.ForEach(m => Console.WriteLine(m));
-            Console.WriteLine($"Is Drop: {isDrop.Result}, drop-pct: {isDrop.Value}");
-            */
 
             Console.WriteLine("Press Ctrl+C to stop");
             var handle = new ManualResetEvent(false);
             Console.CancelKeyPress += (s, e) => { handle.Set(); e.Cancel = true; }; // Cancel must be true, to make sure the process is not killed and we can clean up nicely below
             handle.WaitOne();
             cancellationTokenSource.Cancel();
+        }
+
+        public static void ProcessTickerData(List<Ticker> tickerDataIn, Ticker t)
+        {
+            tickerDataIn.Add(t);
+
+            var periodLength = CurveConfig.Drop().PeriodLength;
+            var tickerData = tickerDataIn
+                .Where(td => td.Timestamp >= DateTime.UtcNow.Subtract(periodLength))
+                .OrderBy(td => td.Timestamp)
+                .ToList();
+
+            tickerDataIn = tickerData; // Ook limiteren (optioneel) ivm memory usage
+
+            var analyzer = new DataAnalyzer(tickerData);
+            var dropRes = analyzer.CheckCurve(t.Timestamp, CurveConfig.Drop());
+            if (dropRes.Result)
+                t.CurvePct = dropRes.Value;
+            else
+            {
+                var raiseRes = analyzer.CheckCurve(t.Timestamp, CurveConfig.Raise());
+                if (raiseRes.Result)
+                    t.CurvePct = raiseRes.Value;
+            }
+
+            Console.Write(t.ToString() + "...");
+            if (t.CurvePct.HasValue)
+                Console.Write($"({t.CurvePct.Value * 100:N2} % curve!)...");
+
+            try
+            {
+                using (var repo = new CryptoTradingRepo(new SqlConnection(connectionString), TimeSpan.FromSeconds(5)))
+                {
+                    repo.StoreTicker(t).GetAwaiter().GetResult();
+                }
+                Console.WriteLine("OK");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Repo-error: " + ex.ToString());
+            }
+
         }
     }
 }
